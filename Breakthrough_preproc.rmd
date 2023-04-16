@@ -1,0 +1,150 @@
+---
+title: "Breakthrough preprocessing"
+output: pdf_document
+date: "2023-02-11"
+author: "Eric Lu"
+---
+
+# Forenotes
+
+This notebook is mainly used for data prep, export, and analysis. The actual machine learning running is done on the HPC using PCLR_breakthrough.R which requires two requisite files produced by this notebook: `breakthrough_sample_soma.rds` and `breakthrough_proteins.rds`.
+
+
+`sample_data` can be considered as deprecated. Its original intention was to control for the clinical indices/patient attributes, but these have been controlled for in the matching criteria in the new set of data. Hence, it is not used in the preprocessing chunk, but retained in case other variables outside of the matching criteria are of interest later.
+
+
+This file should require minimal changes to readjust to reinfection data, but of course, double-checking is mandatory.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+list.of.packages <- c(
+  "foreach","doParallel", "ranger", "tidyverse", "kableExtra",
+  "tidyverse","ggplot2","ggthemes","SomaDataIO","readxl","svMisc","glmnet","MASS",
+  "superpc","umap","rpart","clusterProfiler","enrichplot","survival","sva","caret",
+  "ggpubr","preprocessCore","clogitL1","varhandle","matrixStats","mltools","lme4","lmerTest"
+)
+
+for(package.i in list.of.packages){
+  suppressPackageStartupMessages(
+    library(
+      package.i,
+      character.only = TRUE
+      )
+    )
+}
+
+select <- dplyr::select
+
+soma_path <- "C:/Users/ericj/Box/Resources for Ski Chilton's team/Proteomics Data from SOMAScan/"
+```
+
+```{r Standardized sample data retreival}
+retrieve_samples <- function(samp_df, samp_cname, strata_cname, cc_cname){
+  
+  samps <- samp_df %>% select(all_of(c(samp_cname, strata_cname, cc_cname)))
+  
+  # Retrieve Specimen IDs from Sample Manifest
+  samp_mani <- read_excel(paste(soma_path,
+                                "Sample Manifest AZ HEROES Batch 1 and 2.xlsx",
+                                sep=""
+                                ))
+
+  merge_df <- merge(samps, samp_mani, by.x=samp_cname, by.y="Study ID") %>%
+    select(all_of(c(samp_cname, strata_cname, cc_cname, "Specimen ID")))
+  
+  # Standardize column names
+  names(merge_df) <- c("StudyId", "GroupId", "Group", "SampleId")
+  
+  # Remove groups that are not pairs. Can be adjusted but hardcoded for now
+  merge_df <- merge_df %>% filter(GroupId %in% names(which(table(merge_df$GroupId) == 2)))
+  
+  # Get clinical data as well
+  samp_metad <- read_csv(paste(soma_path, "../PROTEO_FIRSTINF_PLVL_2022NOV03.csv", sep=""))
+  
+  # Merge together to connect with soma_dat
+  sample_data <- merge(merge_df, samp_metad, by.x="StudyId", by.y="studyid")
+  
+  # Impute and factorize select sample data columns
+  # This part is hard-coded and will need manual adjustments when including new variables.
+  sample_data <- sample_data %>% mutate(
+    Group = as.factor(Group),
+    GroupId = as.factor(GroupId),
+    
+    numconditions=replace_na(numconditions, 0),
+    weight_lb=replace_na(weight_lb, median(weight_lb, na.rm=T)),
+    Conditions_lung=as.factor(replace_na(Conditions_lung, 0)),
+    Conditions_cancer=as.factor(replace_na(Conditions_cancer, 0)),
+    Conditions_diabetes=as.factor(replace_na(Conditions_diabetes, 0)),
+    conditions_heart=as.factor(replace_na(conditions_heart, 0)),
+    conditions_bp=as.factor(replace_na(conditions_bp, 0)),
+    conditions_immune=as.factor(replace_na(conditions_immune, 0)),
+    conditions_kidney=as.factor(replace_na(conditions_kidney, 0)),
+    conditions_liver=as.factor(replace_na(conditions_liver, 0)),
+    Conditions_neuro=as.factor(replace_na(Conditions_neuro, 0)),
+    Conditions_autoimmun=as.factor(replace_na(Conditions_autoimmun, 0)),
+    Conditions_other=as.factor(replace_na(Conditions_other, 0)),
+    
+    der_gender=as.factor(der_gender),
+    race=as.factor(race)
+  )
+  
+  return(sample_data)
+}
+
+
+samp_df <- read_csv("C:/Users/ericj/Box/Resources for Ski Chilton's team/1_1 updated match/Proteomics_matched_updated_20230207.csv")
+
+sample_data <- retrieve_samples(samp_df,
+                                samp_cname="studyid",
+                                strata_cname="num_case",
+                                cc_cname="case_control"
+                                )
+
+subj_ids <- sample_data$SampleId
+head(sample_data)
+
+soma_dat <- read_adat(paste0(soma_path,
+  "AZ HEROES Batch 2/SS-2213404_v4.1_Serum.hybNorm.medNormInt.plateScale.calibration.anmlQC.qcCheck.adat"))
+
+analytes <- getAnalyteInfo(soma_dat)
+head(soma_dat); dim(soma_dat)
+```
+
+```{r Preprocessing somalogic data}
+# 7,289 human proteins
+proteins <- analytes %>% filter(Organism == "Human", Type == "Protein")  
+# Invalid proteins
+exclude_proteins <- analytes %>% filter((Organism != "Human") | (Type != "Protein")) %>% pull(AptName)
+
+# Proteomics data
+soma_dat <- soma_dat %>% filter(SampleType == "Sample", SampleId %in% subj_ids)
+
+# Only human protein data
+soma_dat <- soma_dat %>% select(-all_of(exclude_proteins))
+
+# Log2 transform RFU values
+prot_cols <- startsWith(names(soma_dat), "seq.")
+# [,prot_cols] <- log2(soma_dat[,prot_cols])
+
+
+# Retain only relevant protein data
+soma_dat <- rownames_to_column(soma_dat) %>% select(-rowname)
+seq_cols <- which(startsWith(names(soma_dat), "seq."))
+soma_dat <- soma_dat %>% select(c("SampleId", seq_cols))
+
+soma_dat
+```
+
+```{r Export for PCLR}
+sample_soma <- merge(sample_data %>% select(c(SampleId, Group, GroupId)),
+                     soma_dat,
+                     on="StudyId") %>% select(-SampleId)
+
+# Double check the indices. Reinfection dataset for some reason has one less protein and may start at a different index.
+sample_soma[,3:7291] <- log2(sample_soma[,3:7291])
+
+saveRDS(sample_soma, "./OutData/breakthrough_sample_soma.rds")
+saveRDS(proteins, "./OutData/breakthrough_proteins.rds")
+```
