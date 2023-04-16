@@ -8,7 +8,10 @@
 #SBATCH --account=guangyao
 #SBATCH --array=1-1000
 
-cd ---
+cd "."
+
+mkdir("./Breakthrough_PCLR_min/")
+mkdir("./Breakthrough_PCLR_1SE/")
 
 module load R/4.2.2
 
