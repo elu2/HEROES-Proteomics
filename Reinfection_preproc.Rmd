@@ -1,0 +1,111 @@
+---
+title: "Reinfection processing"
+output: pdf_document
+date: "2023-04-20"
+author: "Eric Lu"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+list.of.packages <- c(
+  "foreach","doParallel", "ranger", "tidyverse", "kableExtra",
+  "tidyverse","ggplot2","ggthemes","SomaDataIO","readxl","svMisc","glmnet","MASS",
+  "superpc","umap","rpart","clusterProfiler","enrichplot","survival","sva","caret",
+  "ggpubr","preprocessCore","clogitL1","varhandle","matrixStats","mltools","lme4","lmerTest"
+)
+
+for(package.i in list.of.packages){
+  suppressPackageStartupMessages(
+    library(
+      package.i,
+      character.only = TRUE
+      )
+    )
+}
+
+select <- dplyr::select
+
+soma_path <- "C:/Users/ericj/Box/Resources for Ski Chilton's team/Proteomics Data from SOMAScan/"
+```
+
+```{r Standardized sample data retreival}
+retrieve_samples <- function(samp_df, samp_cname, strata_cname, cc_cname){
+  
+  samps <- samp_df %>% select(all_of(c(samp_cname, strata_cname, cc_cname)))
+  
+  # Retrieve Specimen IDs from Sample Manifest
+  samp_mani <- read_excel(paste(soma_path,
+                                "Sample Manifest AZ HEROES Batch 1 and 2.xlsx",
+                                sep=""
+                                ))
+
+  merge_df <- merge(samps, samp_mani, by.x=samp_cname, by.y="Study ID") %>%
+    select(all_of(c(samp_cname, strata_cname, cc_cname, "Specimen ID")))
+  
+  # Standardize column names
+  names(merge_df) <- c("StudyId", "GroupId", "Group", "SampleId")
+  
+  # Remove groups that are not pairs. Can be adjusted but hardcoded for now
+  merge_df <- merge_df %>% filter(GroupId %in% names(which(table(merge_df$GroupId) == 2)))
+  
+  return(merge_df)
+}
+
+
+samp_df <- read_csv("C:/Users/ericj/Box/Resources for Ski Chilton's team/Proteomics & Reinfection/Reinfection_Proteomic_MatchUpdate_2023-04-19.csv")
+
+sample_data <- retrieve_samples(samp_df,
+                                samp_cname="studyid",
+                                strata_cname="pair",
+                                cc_cname="case"
+                                )
+
+subj_ids <- sample_data$SampleId
+head(sample_data)
+merge(samp_df, samp_mani, by.x="studyid", by.y="Study ID")
+
+soma_dat <- read_adat(paste(soma_path,
+  "AZ HEROES Batch 1/SS-2213404_v4.1_Serum.hybNorm.medNormInt.plateScale.calibration.anmlQC.qcCheck.anmlSMP.adat", sep=""))
+
+analytes <- getAnalyteInfo(soma_dat)
+head(soma_dat); dim(soma_dat)
+```
+
+```{r Preprocessing somalogic data}
+# 7,288 human proteins
+proteins <- analytes %>% filter(Organism == "Human", Type == "Protein")  
+# Invalid proteins
+exclude_proteins <- analytes %>% filter((Organism != "Human") | (Type != "Protein")) %>% pull(AptName)
+
+# Proteomics data
+soma_dat <- soma_dat %>% filter(SampleType == "Sample", SampleId %in% subj_ids)
+
+# Only human protein data
+soma_dat <- soma_dat %>% select(-all_of(exclude_proteins))
+
+# Log2 transform RFU values
+prot_cols <- startsWith(names(soma_dat), "seq.")
+# [,prot_cols] <- log2(soma_dat[,prot_cols])
+
+
+# Retain only relevant protein data
+soma_dat <- rownames_to_column(soma_dat) %>% select(-rowname)
+seq_cols <- which(startsWith(names(soma_dat), "seq."))
+soma_dat <- soma_dat %>% select(c("SampleId", seq_cols))
+
+soma_dat
+```
+
+```{r Export for PCLR}
+sample_soma <- merge(sample_data %>% select(c(SampleId, Group, GroupId)),
+                     soma_dat,
+                     on="StudyId") %>% select(-SampleId)
+
+# Double check the indices. Reinfection dataset for some reason has one less protein and may start at a different index.
+sample_soma[,3:7290] <- log2(sample_soma[,3:7290])
+
+saveRDS(sample_soma, "./OutData/reinf_sample_soma.rds")
+saveRDS(proteins, "./OutData/reinf_proteins.rds")
+```
+
