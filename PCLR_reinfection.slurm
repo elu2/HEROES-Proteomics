@@ -10,9 +10,9 @@
 
 cd "."
 
-mkdir ./Breakthrough_PCLR_min/"
-mkdir ./Breakthrough_PCLR_1SE/"
+mkdir ./Reinfection_PCLR_min/
+mkdir ./Reinfection_PCLR_1SE/
 
 module load R/4.2.2
 
-Rscript PCLR_breakthrough.R ${SLURM_ARRAY_TASK_ID}
+Rscript PCLR_reinfection.R ${SLURM_ARRAY_TASK_ID}

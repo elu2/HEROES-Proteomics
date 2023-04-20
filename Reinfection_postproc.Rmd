@@ -1,0 +1,64 @@
+---
+title: "Reinfection post-proc"
+author: "Eric Lu"
+date: "2023-04-20"
+output: pdf_document
+---
+
+# Forenote
+
+Aggregate results for the outputs of PCLR_breakthrough (and with minor adjustments, also reinfection).
+The 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+select <- dplyr::select
+setwd(".") # Change as needed
+```
+
+```{r PCLR aggregation function}
+#' @param mtype Model type: "min" or "1SE" models to aggregate
+#' @param proteins Dataframe of proteins to reference. Should be in accordance with PCLR_breakthrough.R input
+#' @return Returns dataframe with info about aggregated runs. Also directly exports dataframe to a file.
+aggregate_results <- function(mtype, proteins){
+  # Aggregation of PCLR_breakthrough results.
+  df_list <- list()
+  
+  dname <- paste0("./Reinfection_PCLR_", mtype, "/")
+  N <- length(list.files(dname))
+  
+  pb <- txtProgressBar(min=1, max=N, style=3)
+  for (i in 1:N){
+    df <- read_csv(paste0(dname, i, ".csv"), show_col_type=F)
+    # prots <- df %>% filter(FDR <= cutoff) %>% pull(AptName)
+    df_list[[i]] <- df
+    setTxtProgressBar(pb, i)
+  }
+  out <- do.call(rbind, df_list)
+
+  # Get mean of coefficients and frequency of selection
+  mean_coef_df <- aggregate(out$Coef, by=list(out$AptName), FUN=mean)
+  names(mean_coef_df) <- c("AptName", "MeanCoef")
+  mean_coef_df <- mean_coef_df %>% mutate(Direction=case_when(
+    MeanCoef < 0 ~ "Down",
+    MeanCoef > 0 ~ "Up"
+  ))
+  freq_df <- data.frame(table(out$AptName))
+  names(freq_df) <- c("AptName", "Freq")
+
+  smry_df <- merge(mean_coef_df, freq_df, by="AptName")
+  smry_df <- merge(smry_df, proteins, by="AptName") %>% arrange(-Freq)
+
+  write.csv(smry_df, paste0("./Reinfection_PCLR_", mtype, "-proc.csv"))
+
+  return(smry_df)
+}
+```
+
+```{r Execution}
+proteins <- readRDS("./reinfection_proteins.rds")
+# Choose either 1SE or min
+out.min <- aggregate_results("min", proteins)
+out.1se <- aggregate_results("1SE", proteins)
+```
