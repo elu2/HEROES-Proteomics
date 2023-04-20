@@ -105,7 +105,7 @@ sample_soma <- merge(sample_data %>% select(c(SampleId, Group, GroupId)),
 # Double check the indices. Reinfection dataset for some reason has one less protein and may start at a different index.
 sample_soma[,3:7290] <- log2(sample_soma[,3:7290])
 
-saveRDS(sample_soma, "./OutData/reinf_sample_soma.rds")
-saveRDS(proteins, "./OutData/reinf_proteins.rds")
+saveRDS(sample_soma, "./OutData/reinfection_sample_soma.rds")
+saveRDS(proteins, "./OutData/reinfection_proteins.rds")
 ```
 
