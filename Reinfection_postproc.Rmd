@@ -50,7 +50,7 @@ aggregate_results <- function(mtype, proteins){
   smry_df <- merge(mean_coef_df, freq_df, by="AptName")
   smry_df <- merge(smry_df, proteins, by="AptName") %>% arrange(-Freq)
 
-  write.csv(smry_df, paste0("./Reinfection_PCLR_", mtype, "-proc.csv"))
+  write.csv(smry_df, paste0("./Reinfection_PCLR_", mtype, "-proc.csv"), row.names=F)
 
   return(smry_df)
 }
