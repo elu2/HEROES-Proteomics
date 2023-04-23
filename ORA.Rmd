@@ -1,0 +1,69 @@
+---
+title: "ORA"
+author: "Eric Lu"
+output: html_document
+date: "2023-01-22"
+---
+
+# Forenote
+
+
+Overrepresentation analysis given processed PCLR frequency data.
+
+
+The dotplot has a lot of redundancy given the lukewarm results. $\implies$ TODO: make own dotplot
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+libs <- c("tidyverse", "ggplot2", "clusterProfiler", "org.Hs.eg.db", "DOSE", "ReactomePA", "ggthemes")
+for (lib in libs){
+  library(lib, character.only=T)
+}
+
+select <- dplyr::select
+```
+
+
+```{r}
+# Paramters (only GO is implemented)
+fbase <- "Breakthrough_PCLR_1SE-proc"
+ct_cutoff <- 500
+db <- "GO"
+ont <- "BP"
+
+
+# Load data
+proc_df <- read_csv(paste0("./OutData/", fbase, ".csv"))
+
+# Get thresholded proteins
+sig_prots <- proc_df %>% filter(Freq >= ct_cutoff) %>% pull(EntrezGeneID)
+
+
+# Run ORA for GO and save dotplot image
+kk <- enrichGO(gene=sig_prots,
+               OrgDb=org.Hs.eg.db,
+               pvalueCutoff=0.05,
+               pAdjustMethod="fdr",
+               keyType="ENTREZID",
+               ont=ont
+               )
+dotplot(kk)
+ggsave(sprintf("./figures/%s_ORA_%s_%s.jpg", fbase, db, ont))
+
+
+# Save ORA results to file
+kk@result %>% 
+  filter(qvalue < 0.1) %>% 
+  write.csv(sprintf("./OutData/%s_ORA_%s_%s.csv", fbase, db, ont))
+
+
+# Save thresholded proteins to image
+proc_df %>% filter(Freq >= ct_cutoff) %>% arrange(Freq) %>% ggplot(aes(x=reorder(Target,Freq), y=Freq)) + 
+  geom_col() + #coord_cartesian(ylim=c(500, 1000)) +
+  coord_flip(ylim=c(ct_cutoff, 1000)) + 
+  labs(y="Bootstrap LASSO Selection Freq", x="Protein") + 
+  theme_calc()
+ggsave(sprintf("./figures/%s_FreqBar_%s_%s.jpg", fbase, db, ont))
+```
+
